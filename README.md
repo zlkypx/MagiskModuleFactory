@@ -27,7 +27,7 @@
 ### 方法一：一键安装运行（推荐）
 
 ```bash
-curl -sS https://raw.githubusercontent.com/zlkypx/MagiskModuleFactory/main/setup.sh | bash
+wget https://raw.githubusercontent.com/zlkypx/MagiskModuleFactory/main/setup.sh && bash setup.sh
 ```
 
 ---
