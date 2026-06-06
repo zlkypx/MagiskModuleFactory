@@ -40,36 +40,6 @@ MP4转开机动画 ffmpeg, ffprobe
 
 ---
 
-使用示例
-
-功能4：修改系统属性
-
-```
-请输入要修改的系统属性，格式：属性名=数值
-每行一个属性，输入空行结束
-示例:
-  ro.debuggable=1
-  persist.sys.usb.config=mtp,adb
-开始输入:
-ro.debuggable=1
-persist.sys.usb.config=mtp,adb
-ro.screen.low_brightness=1
-
-已创建 system.prop 文件，包含以下属性:
-----------------------------------------
-ro.debuggable=1
-persist.sys.usb.config=mtp,adb
-ro.screen.low_brightness=1
-----------------------------------------
-```
-
-功能5：开机动画
-
-· 选项1：输入 MP4 文件路径，自动提取帧生成动画包
-· 选项2：直接使用现成的 bootanimation.zip
-
----
-
 输出文件
 
 所有生成的模块保存在当前目录，命名格式：MagiskModuleFactory_功能名_时间戳.zip
