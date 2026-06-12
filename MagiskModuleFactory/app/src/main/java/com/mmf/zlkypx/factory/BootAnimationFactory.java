@@ -1,0 +1,280 @@
+package com.mmf.zlkypx.factory;
+
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.media.MediaMetadataRetriever;
+import android.text.TextUtils;
+
+import com.mmf.zlkypx.util.MagiskModuleUtils;
+
+import java.io.*;
+
+/**
+ * 功能5：开机动画模块工厂
+ * 支持三种来源：1) 已有bootanimation.zip  2) 视频文件转帧  3) 单张静态图片
+ */
+public class BootAnimationFactory {
+
+    /**
+     * 使用已有的bootanimation.zip创建模块
+     */
+    public static File createModuleFromZip(Context context, File bootanimationZip, File outputDir) throws Exception {
+        String timestamp = MagiskModuleUtils.getTimestamp();
+        String moduleId = "bootanimation_" + timestamp;
+        String zipName = "MagiskModuleFactory_bootanimation_" + timestamp + ".zip";
+        File workDir = new File(context.getCacheDir(), "bootanimation_module_" + timestamp);
+
+        MagiskModuleUtils.createCommonModule(workDir, moduleId,
+                "自定义开机动画",
+                "自定义开机动画 - MagiskModuleFactory");
+
+        // 复制到 system/product/media/
+        File mediaDir = new File(workDir, "system/product/media");
+        mediaDir.mkdirs();
+        copyFile(bootanimationZip, new File(mediaDir, "bootanimation.zip"));
+
+        return createZip(workDir, outputDir, zipName);
+    }
+
+    /**
+     * 从视频文件提取帧并创建开机动画模块
+     * @param videoFile 输入视频文件
+     * @param fps 提取帧率（每秒取几帧）
+     * @param width 输出帧宽度
+     * @param height 输出帧高度
+     */
+    public static File createModuleFromVideo(Context context,
+                                             File videoFile,
+                                             int fps,
+                                             int width,
+                                             int height,
+                                             File outputDir) throws Exception {
+        String timestamp = MagiskModuleUtils.getTimestamp();
+        File tempDir = new File(context.getCacheDir(), "bootanim_video_" + timestamp);
+        tempDir.mkdirs();
+        File part0Dir = new File(tempDir, "part0");
+        part0Dir.mkdirs();
+
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        Bitmap sampleBitmap = null;
+        try {
+            retriever.setDataSource(videoFile.getAbsolutePath());
+
+            // 自动检测宽高：参数≤0时从第一个可获取的帧读取原始尺寸
+            if (width <= 0 || height <= 0) {
+                sampleBitmap = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+                if (sampleBitmap != null) {
+                    if (width <= 0) width = sampleBitmap.getWidth();
+                    if (height <= 0) height = sampleBitmap.getHeight();
+                }
+            }
+
+            // 获取视频时长（毫秒）
+            String durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+            if (TextUtils.isEmpty(durationStr)) {
+                throw new Exception("无法读取视频时长");
+            }
+            long durationMs = Long.parseLong(durationStr);
+
+            // 计算帧间隔
+            int frameIntervalUs = 1_000_000 / Math.max(1, fps);
+            int frameCount = 0;
+
+            for (long timeUs = 0; timeUs < durationMs * 1000L; timeUs += frameIntervalUs) {
+                // 跳过timeUs=0，避免重复获取采样帧
+                Bitmap bitmap = (timeUs == 0 && sampleBitmap != null)
+                        ? sampleBitmap
+                        : retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+                if (bitmap == null) continue;
+
+                // 缩放到目标尺寸（尺寸相同时跳过缩小避免失真）
+                Bitmap scaled;
+                if (bitmap.getWidth() == width && bitmap.getHeight() == height) {
+                    scaled = bitmap;
+                } else {
+                    scaled = Bitmap.createScaledBitmap(bitmap, width, height, true);
+                    if (bitmap != sampleBitmap) bitmap.recycle();
+                }
+
+                String frameName = String.format("%06d.png", frameCount);
+                File frameFile = new File(part0Dir, frameName);
+                try (FileOutputStream fos = new FileOutputStream(frameFile)) {
+                    scaled.compress(Bitmap.CompressFormat.PNG, 100, fos);
+                }
+                if (scaled != bitmap) scaled.recycle();
+                frameCount++;
+
+                if (frameCount >= 600) break;
+            }
+
+            if (frameCount == 0) {
+                throw new Exception("未能从视频中提取到任何帧");
+            }
+        } finally {
+            retriever.release();
+        }
+
+        String descContent = width + " " + height + " " + fps + "\n"
+                + "p 1 0 part0\n";
+        try (PrintWriter pw = new PrintWriter(new FileWriter(new File(tempDir, "desc.txt")))) {
+            pw.print(descContent);
+        }
+
+        File bootanimZip = new File(tempDir, "bootanimation.zip");
+        zipDirectoryStore(tempDir, bootanimZip);
+        File result = createModuleFromZip(context, bootanimZip, outputDir);
+        deleteRecursive(tempDir);
+        return result;
+    }
+
+    /**
+     * 从静态图片创建开机动画模块（单帧无限循环）
+     * @param imageFile 输入图片文件
+     * @param width 输出宽度
+     * @param height 输出高度
+     */
+    public static File createModuleFromImage(Context context,
+                                             File imageFile,
+                                             int width,
+                                             int height,
+                                             File outputDir) throws Exception {
+        String timestamp = MagiskModuleUtils.getTimestamp();
+        File tempDir = new File(context.getCacheDir(), "bootanim_image_" + timestamp);
+        tempDir.mkdirs();
+        File part0Dir = new File(tempDir, "part0");
+        part0Dir.mkdirs();
+
+        android.graphics.BitmapFactory.Options opts = new android.graphics.BitmapFactory.Options();
+        opts.inJustDecodeBounds = true;
+        android.graphics.BitmapFactory.decodeFile(imageFile.getAbsolutePath(), opts);
+
+        // 自动检测：≤0时使用原始尺寸
+        if (width <= 0) width = opts.outWidth;
+        if (height <= 0) height = opts.outHeight;
+
+        if (width <= 0 || height <= 0) {
+            throw new Exception("无法获取图片原始尺寸");
+        }
+
+        opts.inJustDecodeBounds = false;
+        Bitmap bitmap = android.graphics.BitmapFactory.decodeFile(imageFile.getAbsolutePath(), opts);
+        if (bitmap == null) {
+            throw new Exception("无法解码图片文件");
+        }
+
+        Bitmap scaled;
+        if (bitmap.getWidth() == width && bitmap.getHeight() == height) {
+            scaled = bitmap;
+        } else {
+            scaled = Bitmap.createScaledBitmap(bitmap, width, height, true);
+            bitmap.recycle();
+        }
+
+        File frameFile = new File(part0Dir, "000000.png");
+        try (FileOutputStream fos = new FileOutputStream(frameFile)) {
+            scaled.compress(Bitmap.CompressFormat.PNG, 100, fos);
+        }
+        if (scaled != bitmap) scaled.recycle();
+
+        String descContent = width + " " + height + " 30\n"
+                + "p 0 0 part0\n";
+        try (PrintWriter pw = new PrintWriter(new FileWriter(new File(tempDir, "desc.txt")))) {
+            pw.print(descContent);
+        }
+
+        File bootanimZip = new File(tempDir, "bootanimation.zip");
+        zipDirectoryStore(tempDir, bootanimZip);
+        File result = createModuleFromZip(context, bootanimZip, outputDir);
+        deleteRecursive(tempDir);
+        return result;
+    }
+
+    private static void copyFile(File source, File dest) throws IOException {
+        try (FileInputStream fis = new FileInputStream(source);
+             FileOutputStream fos = new FileOutputStream(dest)) {
+            byte[] buf = new byte[8192];
+            int len;
+            while ((len = fis.read(buf)) > 0) {
+                fos.write(buf, 0, len);
+            }
+        }
+    }
+
+    private static void copyDirectory(File sourceDir, File destDir) throws IOException {
+        destDir.mkdirs();
+        File[] files = sourceDir.listFiles();
+        if (files != null) {
+            for (File file : files) {
+                File dest = new File(destDir, file.getName());
+                if (file.isDirectory()) {
+                    copyDirectory(file, dest);
+                } else {
+                    copyFile(file, dest);
+                }
+            }
+        }
+    }
+
+    /**
+     * ZIP store模式（不压缩），用于bootanimation.zip
+     */
+    private static void zipDirectoryStore(File sourceDir, File outputZip) throws IOException {
+        java.util.zip.ZipOutputStream zos = new java.util.zip.ZipOutputStream(new FileOutputStream(outputZip));
+        zos.setMethod(java.util.zip.ZipOutputStream.STORED);
+        zipStoreRecursive(sourceDir, "", zos);
+        zos.close();
+    }
+
+    private static void zipStoreRecursive(File dir, String baseName, java.util.zip.ZipOutputStream zos) throws IOException {
+        File[] files = dir.listFiles();
+        if (files == null) return;
+        byte[] buffer = new byte[8192];
+        for (File file : files) {
+            if (file.getName().equals("bootanimation.zip")) continue; // 跳过自身
+            String entryName = baseName + "/" + file.getName();
+            if (file.isDirectory()) {
+                zipStoreRecursive(file, entryName, zos);
+            } else {
+                java.util.zip.ZipEntry ze = new java.util.zip.ZipEntry(entryName);
+                java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+                try (FileInputStream fis = new FileInputStream(file)) {
+                    int len;
+                    while ((len = fis.read(buffer)) > 0) {
+                        crc.update(buffer, 0, len);
+                    }
+                }
+                ze.setMethod(java.util.zip.ZipEntry.STORED);
+                ze.setSize(file.length());
+                ze.setCompressedSize(file.length());
+                ze.setCrc(crc.getValue());
+                zos.putNextEntry(ze);
+                try (FileInputStream fis = new FileInputStream(file)) {
+                    int len;
+                    while ((len = fis.read(buffer)) > 0) {
+                        zos.write(buffer, 0, len);
+                    }
+                }
+                zos.closeEntry();
+            }
+        }
+    }
+
+    private static File createZip(File workDir, File outputDir, String zipName) {
+        File zipFile = new File(outputDir, zipName);
+        MagiskModuleUtils.zipDirectory(workDir, zipFile);
+        deleteRecursive(workDir);
+        return zipFile.exists() ? zipFile : null;
+    }
+
+    private static void deleteRecursive(File file) {
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    deleteRecursive(child);
+                }
+            }
+        }
+        file.delete();
+    }
+}

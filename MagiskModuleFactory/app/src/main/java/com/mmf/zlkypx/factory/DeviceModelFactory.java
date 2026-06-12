@@ -1,0 +1,55 @@
+package com.mmf.zlkypx.factory;
+
+import android.content.Context;
+import com.mmf.zlkypx.util.MagiskModuleUtils;
+
+import java.io.*;
+
+/**
+ * 功能6：生成修改机型模块工厂
+ */
+public class DeviceModelFactory {
+
+    public static File createModule(Context context,
+                                    String brand,
+                                    String manufacturer,
+                                    String model,
+                                    String device,
+                                    File outputDir) throws Exception {
+        String timestamp = MagiskModuleUtils.getTimestamp();
+        String moduleId = "device_model_" + timestamp;
+        String zipName = "MagiskModuleFactory_devicemodel_" + timestamp + ".zip";
+        File workDir = new File(context.getCacheDir(), "device_model_module_" + timestamp);
+
+        MagiskModuleUtils.createCommonModule(workDir, moduleId,
+                "机型修改: " + model,
+                "修改设备机型 - MagiskModuleFactory");
+
+        String propContent = "ro.product.brand=" + brand + "\n"
+                + "ro.product.manufacturer=" + manufacturer + "\n"
+                + "ro.product.model=" + model + "\n"
+                + "ro.product.device=" + device + "\n";
+        MagiskModuleUtils.createSystemProp(workDir, propContent);
+
+        return createZip(workDir, outputDir, zipName);
+    }
+
+    private static File createZip(File workDir, File outputDir, String zipName) {
+        File zipFile = new File(outputDir, zipName);
+        MagiskModuleUtils.zipDirectory(workDir, zipFile);
+        deleteRecursive(workDir);
+        return zipFile.exists() ? zipFile : null;
+    }
+
+    private static void deleteRecursive(File file) {
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    deleteRecursive(child);
+                }
+            }
+        }
+        file.delete();
+    }
+}

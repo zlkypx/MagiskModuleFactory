@@ -1,0 +1,735 @@
+package com.mmf.zlkypx;
+
+import android.Manifest;
+import android.app.AlertDialog;
+import android.app.ProgressDialog;
+import android.content.DialogInterface;
+import android.content.pm.PackageManager;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
+import android.text.InputType;
+import android.text.TextUtils;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.widget.ArrayAdapter;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.ListView;
+import android.widget.Spinner;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.Toolbar;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+
+import com.mmf.zlkypx.factory.AppToSystemFactory;
+import com.mmf.zlkypx.factory.BootAnimationFactory;
+import com.mmf.zlkypx.factory.DeviceModelFactory;
+import com.mmf.zlkypx.factory.FileReplaceFactory;
+import com.mmf.zlkypx.factory.FontModuleFactory;
+import com.mmf.zlkypx.factory.HideModuleFactory;
+import com.mmf.zlkypx.factory.HostsFactory;
+import com.mmf.zlkypx.factory.StartupScriptFactory;
+import com.mmf.zlkypx.factory.SystemPropFactory;
+import com.mmf.zlkypx.util.ModuleInstaller;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+public class MainActivity extends AppCompatActivity {
+
+    private static final int PERMISSION_REQUEST_CODE = 100;
+    private static final String OUTPUT_DIR_NAME = "MagiskModuleFactory";
+
+    private RecyclerView recyclerView;
+    private FunctionAdapter adapter;
+    private ExecutorService executor = Executors.newSingleThreadExecutor();
+    private Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    private File outputDir;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+
+        Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
+        setSupportActionBar(toolbar);
+
+        outputDir = new File(Environment.getExternalStorageDirectory(), OUTPUT_DIR_NAME);
+        if (!outputDir.exists()) {
+            outputDir.mkdirs();
+        }
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{
+                            Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                            Manifest.permission.READ_EXTERNAL_STORAGE
+                    }, PERMISSION_REQUEST_CODE);
+        }
+
+        initRecyclerView();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+                                           @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == PERMISSION_REQUEST_CODE) {
+            if (grantResults.length > 0 && grantResults[0] != PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(this, "需要存储权限才能输出模块文件", Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    private void initRecyclerView() {
+        recyclerView = findViewById(R.id.recyclerView);
+        recyclerView.setLayoutManager(new LinearLayoutManager(this));
+
+        List<FunctionAdapter.FunctionItem> items = new ArrayList<>();
+        items.add(new FunctionAdapter.FunctionItem(1, "普通应用转系统应用", "将第三方应用固化为系统应用，支持APK和lib提取"));
+        items.add(new FunctionAdapter.FunctionItem(2, "修改/system分区文件", "替换/system目录中的文件，需提供目标路径和替换文件"));
+        items.add(new FunctionAdapter.FunctionItem(3, "修改/vendor分区文件", "替换/vendor目录中的文件，适用于vendor自定义"));
+        items.add(new FunctionAdapter.FunctionItem(4, "修改系统属性", "批量修改系统属性（system.prop），如调试/性能调整"));
+        items.add(new FunctionAdapter.FunctionItem(5, "开机动画模块", "替换开机动画，支持bootanimation.zip或帧目录构建"));
+        items.add(new FunctionAdapter.FunctionItem(6, "修改机型信息", "修改设备型号/品牌/制造商等属性"));
+        items.add(new FunctionAdapter.FunctionItem(7, "自定义Hosts模块", "替换系统hosts文件，用于广告屏蔽或自定义DNS"));
+        items.add(new FunctionAdapter.FunctionItem(8, "开机自启脚本模块", "创建开机启动脚本（service.sh 或 post-fs-data.sh）"));
+        items.add(new FunctionAdapter.FunctionItem(9, "隐藏Magisk模块助手", "帮助隐藏其他Magisk模块，用于银行/验证应用"));
+        items.add(new FunctionAdapter.FunctionItem(10, "字体替换模块", "替换系统字体，支持1-9字重（Thin到Black）"));
+
+        adapter = new FunctionAdapter(items, new FunctionAdapter.OnItemClickListener() {
+            @Override
+            public void onItemClick(int position, FunctionAdapter.FunctionItem item) {
+                switch (item.id) {
+                    case 1: showAppToSystemDialog(); break;
+                    case 2: showFileReplaceDialog("system"); break;
+                    case 3: showFileReplaceDialog("vendor"); break;
+                    case 4: showSystemPropDialog(); break;
+                    case 5: showBootAnimationDialog(); break;
+                    case 6: showDeviceModelDialog(); break;
+                    case 7: showHostsDialog(); break;
+                    case 8: showStartupScriptDialog(); break;
+                    case 9: showHideModuleDialog(); break;
+                    case 10: showFontModuleDialog(); break;
+                }
+            }
+        });
+        recyclerView.setAdapter(adapter);
+    }
+
+    // ==================== 1: 应用转系统应用 ====================
+    private void showAppToSystemDialog() {
+        final List<AppToSystemFactory.AppInfo> appList = AppToSystemFactory.getInstalledApps(this);
+        if (appList.isEmpty()) {
+            Toast.makeText(this, "没有找到第三方应用", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        final String[] appNames = new String[appList.size()];
+        for (int i = 0; i < appList.size(); i++) {
+            appNames[i] = appList.get(i).toString();
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("选择应用转系统应用")
+                .setItems(appNames, new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        final AppToSystemFactory.AppInfo selected = appList.get(which);
+                        new AlertDialog.Builder(MainActivity.this)
+                                .setTitle("确认操作")
+                                .setMessage("将 " + selected.packageName + " 转化为系统应用？\n\n此操作不会修改当前系统分区，生成的Magisk模块可自行刷入。")
+                                .setPositiveButton("生成模块", new DialogInterface.OnClickListener() {
+                                    @Override
+                                    public void onClick(DialogInterface d, int w) {
+                                        executeAsync("正在生成应用转系统模块...", new Runnable() {
+                                            @Override
+                                            public void run() {
+                                                try {
+                                                    File zip = AppToSystemFactory.createModule(MainActivity.this, selected, outputDir);
+                                                    showResult(zip, "应用转系统模块");
+                                                } catch (Exception e) {
+                                                    showError(e);
+                                                }
+                                            }
+                                        });
+                                    }
+                                })
+                                .setNegativeButton("取消", null)
+                                .show();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    // ==================== 2/3: 文件替换 ====================
+    private void showFileReplaceDialog(final String partition) { // final already
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(32, 16, 32, 0);
+
+        final EditText etTargetPath = new EditText(this);
+        etTargetPath.setHint("目标文件路径（如 /" + partition + "/build.prop）");
+        layout.addView(etTargetPath);
+
+        final EditText etSourcePath = new EditText(this);
+        etSourcePath.setHint("替换源文件完整路径");
+        etSourcePath.setPadding(0, 16, 0, 0);
+        layout.addView(etSourcePath);
+
+        new AlertDialog.Builder(this)
+                .setTitle("修改/" + partition + " 分区文件")
+                .setView(layout)
+                .setPositiveButton("生成模块", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int w) {
+                        final String target = etTargetPath.getText().toString().trim();
+                        final String source = etSourcePath.getText().toString().trim();
+                        if (TextUtils.isEmpty(target) || TextUtils.isEmpty(source)) {
+                            Toast.makeText(MainActivity.this, "请填写完整信息", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        final File sourceFile = new File(source);
+                        if (!sourceFile.exists()) {
+                            Toast.makeText(MainActivity.this, "源文件不存在", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        executeAsync("正在生成" + partition + "文件替换模块...", new Runnable() {
+                            @Override
+                            public void run() {
+                                try {
+                                    File zip = FileReplaceFactory.createModule(
+                                            MainActivity.this, partition, target, sourceFile, outputDir);
+                                    showResult(zip, partition + "文件替换模块");
+                                } catch (Exception e) {
+                                    showError(e);
+                                }
+                            }
+                        });
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    // ==================== 4: 系统属性修改 ====================
+    private void showSystemPropDialog() {
+        final EditText et = new EditText(this);
+        et.setHint("每行一个属性，格式：key=value\n例如：\nro.debuggable=1\npersist.sys.locale=zh-CN");
+        et.setMinLines(4);
+        et.setGravity(android.view.Gravity.TOP);
+        et.setPadding(32, 16, 32, 16);
+
+        new AlertDialog.Builder(this)
+                .setTitle("修改系统属性")
+                .setView(et)
+                .setPositiveButton("生成模块", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int w) {
+                        final String content = et.getText().toString().trim();
+                        if (TextUtils.isEmpty(content)) {
+                            Toast.makeText(MainActivity.this, "请输入属性内容", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        final String[] lines = content.split("\n");
+                        executeAsync("正在生成系统属性模块...", new Runnable() {
+                            @Override
+                            public void run() {
+                                try {
+                                    File zip = SystemPropFactory.createModule(MainActivity.this, lines, outputDir);
+                                    showResult(zip, "系统属性模块");
+                                } catch (Exception e) {
+                                    showError(e);
+                                }
+                            }
+                        });
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    // ==================== 5: 开机动画 ====================
+    private void showBootAnimationDialog() {
+        new AlertDialog.Builder(this)
+                .setTitle("开机动画")
+                .setMessage("选择开机动画来源：\n\n1. 已有bootanimation.zip文件\n2. 从帧目录构建（需part0目录和desc.txt）")
+                .setPositiveButton("使用ZIP文件", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int w) {
+                        showBootAnimationZipDialog();
+                    }
+                })
+                .setNeutralButton("从帧目录构建", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int w) {
+                        showBootAnimationFramesDialog();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void showBootAnimationZipDialog() {
+        final EditText et = new EditText(this);
+        et.setHint("bootanimation.zip 文件完整路径");
+        et.setPadding(32, 16, 32, 16);
+        new AlertDialog.Builder(this)
+                .setTitle("选择bootanimation.zip")
+                .setView(et)
+                .setPositiveButton("生成", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d2, int w2) {
+                        final String path = et.getText().toString().trim();
+                        final File zipFile = new File(path);
+                        if (!zipFile.exists()) {
+                            Toast.makeText(MainActivity.this, "文件不存在", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        executeAsync("正在生成开机动画模块...", new Runnable() {
+                            @Override
+                            public void run() {
+                                try {
+                                    File result = BootAnimationFactory.createModuleFromZip(
+                                            MainActivity.this, zipFile, outputDir);
+                                    showResult(result, "开机动画模块");
+                                } catch (Exception e) {
+                                    showError(e);
+                                }
+                            }
+                        });
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void showBootAnimationFramesDialog() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(32, 16, 32, 0);
+
+        final EditText etFrameDir = new EditText(this);
+        etFrameDir.setHint("part0目录完整路径（包含帧PNG文件）");
+        layout.addView(etFrameDir);
+
+        final EditText etDesc = new EditText(this);
+        etDesc.setHint("desc.txt内容\n如：1080 1920 30\np 1 0 part0");
+        etDesc.setMinLines(3);
+        etDesc.setGravity(android.view.Gravity.TOP);
+        etDesc.setPadding(0, 16, 0, 0);
+        layout.addView(etDesc);
+
+        new AlertDialog.Builder(this)
+                .setTitle("从帧目录构建开机动画")
+                .setView(layout)
+                .setPositiveButton("生成模块", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int w) {
+                        final String frameDirPath = etFrameDir.getText().toString().trim();
+                        final String descContent = etDesc.getText().toString().trim();
+                        if (TextUtils.isEmpty(frameDirPath) || TextUtils.isEmpty(descContent)) {
+                            Toast.makeText(MainActivity.this, "请填写完整信息", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        final File frameDir = new File(frameDirPath);
+                        if (!frameDir.isDirectory()) {
+                            Toast.makeText(MainActivity.this, "帧目录不存在", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        executeAsync("正在生成开机动画模块...", new Runnable() {
+                            @Override
+                            public void run() {
+                                try {
+                                    File result = BootAnimationFactory.createModuleFromFrames(
+                                            MainActivity.this, frameDir, "bootanimation.zip", descContent, outputDir);
+                                    showResult(result, "开机动画模块");
+                                } catch (Exception e) {
+                                    showError(e);
+                                }
+                            }
+                        });
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    // ==================== 6: 修改机型 ====================
+    private void showDeviceModelDialog() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(32, 16, 32, 0);
+
+        final EditText etBrand = new EditText(this);
+        etBrand.setHint("品牌（如 Samsung）");
+        layout.addView(etBrand);
+
+        final EditText etManufacturer = new EditText(this);
+        etManufacturer.setHint("制造商（如 samsung）");
+        etManufacturer.setPadding(0, 16, 0, 0);
+        layout.addView(etManufacturer);
+
+        final EditText etModel = new EditText(this);
+        etModel.setHint("型号（如 Galaxy S21）");
+        etModel.setPadding(0, 16, 0, 0);
+        layout.addView(etModel);
+
+        final EditText etDevice = new EditText(this);
+        etDevice.setHint("设备代号（如 SM-G9910）");
+        etDevice.setPadding(0, 16, 0, 0);
+        layout.addView(etDevice);
+
+        new AlertDialog.Builder(this)
+                .setTitle("修改机型信息")
+                .setView(layout)
+                .setPositiveButton("生成模块", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int w) {
+                        final String brand = etBrand.getText().toString().trim();
+                        final String manufacturer = etManufacturer.getText().toString().trim();
+                        final String model = etModel.getText().toString().trim();
+                        final String device = etDevice.getText().toString().trim();
+
+                        if (TextUtils.isEmpty(brand) || TextUtils.isEmpty(manufacturer)
+                                || TextUtils.isEmpty(model) || TextUtils.isEmpty(device)) {
+                            Toast.makeText(MainActivity.this, "请填写所有字段", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        executeAsync("正在生成机型修改模块...", new Runnable() {
+                            @Override
+                            public void run() {
+                                try {
+                                    File zip = DeviceModelFactory.createModule(
+                                            MainActivity.this, brand, manufacturer, model, device, outputDir);
+                                    showResult(zip, "机型修改模块");
+                                } catch (Exception e) {
+                                    showError(e);
+                                }
+                            }
+                        });
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    // ==================== 7: 自定义Hosts ====================
+    private void showHostsDialog() {
+        final EditText et = new EditText(this);
+        et.setHint("自定义hosts条目（每行一条）\n例如：\n127.0.0.1 example.com\n0.0.0.0 ads.example.com\n\n基础回环地址会自动添加。");
+        et.setMinLines(6);
+        et.setGravity(android.view.Gravity.TOP);
+        et.setPadding(32, 16, 32, 16);
+
+        new AlertDialog.Builder(this)
+                .setTitle("自定义Hosts模块")
+                .setView(et)
+                .setPositiveButton("生成模块", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int w) {
+                        final String content = et.getText().toString().trim();
+                        executeAsync("正在生成Hosts模块...", new Runnable() {
+                            @Override
+                            public void run() {
+                                try {
+                                    File zip = HostsFactory.createModule(MainActivity.this, content, outputDir);
+                                    showResult(zip, "Hosts模块");
+                                } catch (Exception e) {
+                                    showError(e);
+                                }
+                            }
+                        });
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    // ==================== 8: 开机自启脚本 ====================
+    private void showStartupScriptDialog() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(32, 16, 32, 0);
+
+        final Spinner spinner = new Spinner(this);
+        String[] modes = {"post-fs-data.sh（早于data挂载）", "service.sh（晚于启动完成）"};
+        ArrayAdapter<String> spinAdapter = new ArrayAdapter<String>(this,
+                android.R.layout.simple_spinner_dropdown_item, modes);
+        spinner.setAdapter(spinAdapter);
+        layout.addView(spinner);
+
+        final EditText et = new EditText(this);
+        et.setHint("脚本内容\n例如：\nresetprop ro.sf.lcd_density 440\nsetenforce 0");
+        et.setMinLines(6);
+        et.setGravity(android.view.Gravity.TOP);
+        et.setPadding(0, 16, 0, 0);
+        layout.addView(et);
+
+        new AlertDialog.Builder(this)
+                .setTitle("开机自启脚本模块")
+                .setView(layout)
+                .setPositiveButton("生成模块", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int w) {
+                        final int type = spinner.getSelectedItemPosition() == 0
+                                ? StartupScriptFactory.SCRIPT_POST_FS_DATA
+                                : StartupScriptFactory.SCRIPT_SERVICE;
+                        final String content = et.getText().toString().trim();
+                        if (TextUtils.isEmpty(content)) {
+                            Toast.makeText(MainActivity.this, "请输入脚本内容", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        executeAsync("正在生成开机自启脚本模块...", new Runnable() {
+                            @Override
+                            public void run() {
+                                try {
+                                    File zip = StartupScriptFactory.createModule(MainActivity.this, type, content, outputDir);
+                                    showResult(zip, "开机自启脚本模块");
+                                } catch (Exception e) {
+                                    showError(e);
+                                }
+                            }
+                        });
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    // ==================== 9: 隐藏Magisk模块助手 ====================
+    private void showHideModuleDialog() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(32, 16, 32, 0);
+
+        final EditText etModuleId = new EditText(this);
+        etModuleId.setHint("目标模块ID（如 magiskhide）");
+        layout.addView(etModuleId);
+
+        final EditText etModuleName = new EditText(this);
+        etModuleName.setHint("目标模块名（如 MagiskHide）");
+        etModuleName.setPadding(0, 16, 0, 0);
+        layout.addView(etModuleName);
+
+        new AlertDialog.Builder(this)
+                .setTitle("隐藏Magisk模块助手")
+                .setView(layout)
+                .setPositiveButton("生成模块", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int w) {
+                        final String modId = etModuleId.getText().toString().trim();
+                        final String modName = etModuleName.getText().toString().trim();
+                        if (TextUtils.isEmpty(modId) || TextUtils.isEmpty(modName)) {
+                            Toast.makeText(MainActivity.this, "请填写完整信息", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        executeAsync("正在生成隐藏助手模块...", new Runnable() {
+                            @Override
+                            public void run() {
+                                try {
+                                    File zip = HideModuleFactory.createModule(MainActivity.this, modId, modName, outputDir);
+                                    showResult(zip, "隐藏Magisk模块助手");
+                                } catch (Exception e) {
+                                    showError(e);
+                                }
+                            }
+                        });
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    // ==================== 10: 字体替换 ====================
+    private void showFontModuleDialog() {
+        final String[] weightNames = {
+                "1 - Thin（最细）", "2 - ExtraLight", "3 - Light",
+                "4 - Regular（常规）", "5 - Medium", "6 - SemiBold",
+                "7 - Bold（粗体）", "8 - ExtraBold", "9 - Black（最粗）"
+        };
+
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(32, 16, 32, 0);
+
+        TextView tvHint = new TextView(this);
+        tvHint.setText("请为每个需要的字重指定字体文件路径，不需要的字重留空即可：");
+        tvHint.setTextSize(13);
+        layout.addView(tvHint);
+
+        final EditText[] etWeights = new EditText[9];
+        for (int i = 0; i < 9; i++) {
+            EditText et = new EditText(this);
+            et.setHint(weightNames[i]);
+            et.setPadding(0, 8, 0, 0);
+            layout.addView(et);
+            etWeights[i] = et;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("字体替换模块")
+                .setView(layout)
+                .setPositiveButton("生成模块", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int w) {
+                        final Map<Integer, File> fontMap = new HashMap<Integer, File>();
+                        for (int i = 0; i < 9; i++) {
+                            String path = etWeights[i].getText().toString().trim();
+                            if (!TextUtils.isEmpty(path)) {
+                                File fontFile = new File(path);
+                                if (fontFile.exists()) {
+                                    fontMap.put(i + 1, fontFile);
+                                }
+                            }
+                        }
+                        if (fontMap.isEmpty()) {
+                            Toast.makeText(MainActivity.this, "请至少指定一个字体文件", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        executeAsync("正在生成字体替换模块...", new Runnable() {
+                            @Override
+                            public void run() {
+                                try {
+                                    File zip = FontModuleFactory.createModule(MainActivity.this, fontMap, outputDir);
+                                    showResult(zip, "字体替换模块");
+                                } catch (Exception e) {
+                                    showError(e);
+                                }
+                            }
+                        });
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    // ==================== 通用工具方法 ====================
+
+    private void executeAsync(String progressMessage, final Runnable task) {
+        final ProgressDialog pd = ProgressDialog.show(this, "请稍候", progressMessage, true, false);
+        executor.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    task.run();
+                } finally {
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            try { pd.dismiss(); } catch (Exception ignored) {}
+                        }
+                    });
+                }
+            }
+        });
+    }
+
+    private void showResult(final File zip, final String moduleName) {
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (zip != null && zip.exists()) {
+                    new AlertDialog.Builder(MainActivity.this)
+                            .setTitle("模块生成成功")
+                            .setMessage("模块名称：" + zip.getName()
+                                    + "\n位置：" + zip.getAbsolutePath()
+                                    + "\n大小：" + formatFileSize(zip.length())
+                                    + "\n\n是否需要安装此模块？")
+                            .setPositiveButton("立即安装", new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface d, int w) {
+                                    installModule(zip);
+                                }
+                            })
+                            .setNegativeButton("暂不安装", null)
+                            .show();
+                } else {
+                    Toast.makeText(MainActivity.this, "模块生成失败", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+    }
+
+    private void installModule(final File moduleZip) {
+        if (!ModuleInstaller.hasRootAccess()) {
+            Toast.makeText(this, "未检测到root权限，无法安装", Toast.LENGTH_LONG).show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("确认安装")
+                .setMessage("即将安装：\n" + moduleZip.getName()
+                        + "\n\n请确保已安装Magisk/KernelSU/APatch")
+                .setPositiveButton("安装", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int w) {
+                        executeAsync("正在安装模块...", new Runnable() {
+                            @Override
+                            public void run() {
+                                final boolean ok = ModuleInstaller.installModule(moduleZip);
+                                mainHandler.post(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        if (ok) {
+                                            new AlertDialog.Builder(MainActivity.this)
+                                                    .setTitle("安装完成")
+                                                    .setMessage("模块已安装，请重启设备使其生效。")
+                                                    .setPositiveButton("确定", null)
+                                                    .show();
+                                        } else {
+                                            Toast.makeText(MainActivity.this, "安装失败，请检查root权限和Magisk状态", Toast.LENGTH_LONG).show();
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void showError(final Exception e) {
+        mainHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("生成失败")
+                        .setMessage("错误信息：\n" + msg)
+                        .setPositiveButton("确定", null)
+                        .show();
+            }
+        });
+    }
+
+    private String formatFileSize(long size) {
+        if (size < 1024) return size + " B";
+        if (size < 1024 * 1024) return String.format("%.1f KB", size / 1024.0);
+        return String.format("%.2f MB", size / (1024.0 * 1024.0));
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        executor.shutdown();
+    }
+}

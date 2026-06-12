@@ -1,0 +1,94 @@
+package com.mmf.zlkypx.factory;
+
+import android.content.Context;
+import com.mmf.zlkypx.util.MagiskModuleUtils;
+
+import java.io.*;
+
+/**
+ * 功能9：隐藏Magisk模块工厂
+ */
+public class HideModuleFactory {
+
+    /**
+     * 从模块ZIP中读取module.prop提取id
+     */
+    public static String extractModuleId(File moduleZip) {
+        java.util.zip.ZipFile zip = null;
+        try {
+            zip = new java.util.zip.ZipFile(moduleZip);
+            java.util.zip.ZipEntry entry = zip.getEntry("module.prop");
+            if (entry == null) return null;
+
+            java.io.InputStream is = zip.getInputStream(entry);
+            java.util.Properties props = new java.util.Properties();
+            props.load(is);
+            is.close();
+            return props.getProperty("id");
+        } catch (Exception e) {
+            return null;
+        } finally {
+            if (zip != null) try { zip.close(); } catch (Exception ignored) {}
+        }
+    }
+
+    /**
+     * 从模块ZIP中读取module.prop提取name
+     */
+    public static String extractModuleName(File moduleZip) {
+        java.util.zip.ZipFile zip = null;
+        try {
+            zip = new java.util.zip.ZipFile(moduleZip);
+            java.util.zip.ZipEntry entry = zip.getEntry("module.prop");
+            if (entry == null) return null;
+
+            java.io.InputStream is = zip.getInputStream(entry);
+            java.util.Properties props = new java.util.Properties();
+            props.load(is);
+            is.close();
+            return props.getProperty("name");
+        } catch (Exception e) {
+            return null;
+        } finally {
+            if (zip != null) try { zip.close(); } catch (Exception ignored) {}
+        }
+    }
+
+    /**
+     * 创建隐藏模块助手
+     */
+    public static File createModule(Context context, String targetModuleId, String targetModuleName, File outputDir) throws Exception {
+        String timestamp = MagiskModuleUtils.getTimestamp();
+        String helperId = "hide_helper_" + timestamp;
+        String zipName = "MagiskModuleFactory_hidehelper_" + timestamp + ".zip";
+        File workDir = new File(context.getCacheDir(), "hide_module_helper_" + timestamp);
+
+        MagiskModuleUtils.createCommonModule(workDir, helperId,
+                "隐藏模块助手 (" + targetModuleName + ")",
+                "开机时删除目标模块的 module.prop");
+
+        String scriptContent = "rm -f /data/adb/modules/" + targetModuleId + "/module.prop\n";
+        MagiskModuleUtils.createShellScript(workDir, "service.sh", scriptContent);
+
+        return createZip(workDir, outputDir, zipName);
+    }
+
+    private static File createZip(File workDir, File outputDir, String zipName) {
+        File zipFile = new File(outputDir, zipName);
+        MagiskModuleUtils.zipDirectory(workDir, zipFile);
+        deleteRecursive(workDir);
+        return zipFile.exists() ? zipFile : null;
+    }
+
+    private static void deleteRecursive(File file) {
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    deleteRecursive(child);
+                }
+            }
+        }
+        file.delete();
+    }
+}

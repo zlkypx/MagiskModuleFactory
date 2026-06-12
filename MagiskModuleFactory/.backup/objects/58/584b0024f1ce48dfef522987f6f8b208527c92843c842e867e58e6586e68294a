@@ -1,0 +1,159 @@
+package com.mmf.zlkypx.factory;
+
+import android.content.Context;
+import com.mmf.zlkypx.util.MagiskModuleUtils;
+
+import java.io.*;
+
+/**
+ * 功能5：开机动画模块工厂
+ * 支持两种来源：1) 已有的bootanimation.zip  2) 手动构建的bootanimation.zip
+ */
+public class BootAnimationFactory {
+
+    /**
+     * 使用已有的bootanimation.zip创建模块
+     */
+    public static File createModuleFromZip(Context context, File bootanimationZip, File outputDir) throws Exception {
+        String timestamp = MagiskModuleUtils.getTimestamp();
+        String moduleId = "bootanimation_" + timestamp;
+        String zipName = "MagiskModuleFactory_bootanimation_" + timestamp + ".zip";
+        File workDir = new File(context.getCacheDir(), "bootanimation_module_" + timestamp);
+
+        MagiskModuleUtils.createCommonModule(workDir, moduleId,
+                "自定义开机动画",
+                "自定义开机动画 - MagiskModuleFactory");
+
+        // 复制到 system/product/media/
+        File mediaDir = new File(workDir, "system/product/media");
+        mediaDir.mkdirs();
+        copyFile(bootanimationZip, new File(mediaDir, "bootanimation.zip"));
+
+        return createZip(workDir, outputDir, zipName);
+    }
+
+    /**
+     * 使用已提取的帧目录 + desc.txt 手动构建 bootanimation.zip 并创建模块
+     * @param frameDir 包含帧PNG文件的目录（如 part0）
+     * @param descContent desc.txt 内容
+     */
+    public static File createModuleFromFrames(Context context,
+                                              File frameDir,
+                                              String framesZipName,
+                                              String descContent,
+                                              File outputDir) throws Exception {
+        String timestamp = MagiskModuleUtils.getTimestamp();
+
+        // 先构建bootanimation.zip
+        File tempDir = new File(context.getCacheDir(), "bootanim_temp_" + timestamp);
+        tempDir.mkdirs();
+
+        // 写desc.txt
+        try (PrintWriter pw = new PrintWriter(new FileWriter(new File(tempDir, "desc.txt")))) {
+            pw.print(descContent);
+        }
+
+        // 复制帧目录
+        copyDirectory(frameDir, new File(tempDir, framesZipName));
+
+        // 压缩为 bootanimation.zip（store模式，无压缩）
+        File bootanimZip = new File(tempDir, "bootanimation.zip");
+        zipDirectoryStore(tempDir, bootanimZip);
+
+        // 创建模块
+        File result = createModuleFromZip(context, bootanimZip, outputDir);
+
+        // 清理
+        deleteRecursive(tempDir);
+        return result;
+    }
+
+    private static void copyFile(File source, File dest) throws IOException {
+        try (FileInputStream fis = new FileInputStream(source);
+             FileOutputStream fos = new FileOutputStream(dest)) {
+            byte[] buf = new byte[8192];
+            int len;
+            while ((len = fis.read(buf)) > 0) {
+                fos.write(buf, 0, len);
+            }
+        }
+    }
+
+    private static void copyDirectory(File sourceDir, File destDir) throws IOException {
+        destDir.mkdirs();
+        File[] files = sourceDir.listFiles();
+        if (files != null) {
+            for (File file : files) {
+                File dest = new File(destDir, file.getName());
+                if (file.isDirectory()) {
+                    copyDirectory(file, dest);
+                } else {
+                    copyFile(file, dest);
+                }
+            }
+        }
+    }
+
+    /**
+     * ZIP store模式（不压缩），用于bootanimation.zip
+     */
+    private static void zipDirectoryStore(File sourceDir, File outputZip) throws IOException {
+        java.util.zip.ZipOutputStream zos = new java.util.zip.ZipOutputStream(new FileOutputStream(outputZip));
+        zos.setMethod(java.util.zip.ZipOutputStream.STORED);
+        zipStoreRecursive(sourceDir, "", zos);
+        zos.close();
+    }
+
+    private static void zipStoreRecursive(File dir, String baseName, java.util.zip.ZipOutputStream zos) throws IOException {
+        File[] files = dir.listFiles();
+        if (files == null) return;
+        byte[] buffer = new byte[8192];
+        for (File file : files) {
+            if (file.getName().equals("bootanimation.zip")) continue; // 跳过自身
+            String entryName = baseName + "/" + file.getName();
+            if (file.isDirectory()) {
+                zipStoreRecursive(file, entryName, zos);
+            } else {
+                java.util.zip.ZipEntry ze = new java.util.zip.ZipEntry(entryName);
+                java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+                try (FileInputStream fis = new FileInputStream(file)) {
+                    int len;
+                    while ((len = fis.read(buffer)) > 0) {
+                        crc.update(buffer, 0, len);
+                    }
+                }
+                ze.setMethod(java.util.zip.ZipEntry.STORED);
+                ze.setSize(file.length());
+                ze.setCompressedSize(file.length());
+                ze.setCrc(crc.getValue());
+                zos.putNextEntry(ze);
+                try (FileInputStream fis = new FileInputStream(file)) {
+                    int len;
+                    while ((len = fis.read(buffer)) > 0) {
+                        zos.write(buffer, 0, len);
+                    }
+                }
+                zos.closeEntry();
+            }
+        }
+    }
+
+    private static File createZip(File workDir, File outputDir, String zipName) {
+        File zipFile = new File(outputDir, zipName);
+        MagiskModuleUtils.zipDirectory(workDir, zipFile);
+        deleteRecursive(workDir);
+        return zipFile.exists() ? zipFile : null;
+    }
+
+    private static void deleteRecursive(File file) {
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    deleteRecursive(child);
+                }
+            }
+        }
+        file.delete();
+    }
+}

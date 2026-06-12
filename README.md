@@ -1,7 +1,7 @@
 # MagiskModuleFactory
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-一键生成 Magisk 模块的 Shell 脚本
+一键生成 Magisk 模块的 Android 应用
 **许可证**: GNU General Public License v3.0
 
 ---
@@ -16,29 +16,12 @@
 | 4 | 生成修改系统属性模块 | 支持多行输入，批量修改系统属性 |
 | 5 | 开机动画模块 | 支持 MP4 转动画 / 直接使用 bootanimation.zip |
 | 6 | 生成修改机型模块 | 修改品牌、制造商、型号 |
-| 7 | 自定义 hosts 文件模块 | 支持本地文件/网络下载/手动输入 |
+| 7 | 自定义 hosts 文件模块 | 支持本地文件/手动输入 |
 | 8 | 开机自启脚本模块 | 生成 `post-fs-data.sh` 或 `service.sh` |
-| 9 | 隐藏 Magisk 模块 | 删除目标模块的 `module.prop` 实现隐藏 |
+| 9 | 自定义字体模块 | 支持多字重 |
 
 ---
 
-## 快速开始
-
-### 方法一：一键安装运行（推荐）
-
-```bash
-wget https://raw.githubusercontent.com/zlkypx/MagiskModuleFactory/main/setup.sh && bash setup.sh
-```
-
----
-
-依赖说明
-必要 pm, zip, unzip 
-MP4转开机动画 ffmpeg, ffprobe 
-网络下载 curl
-克隆仓库 git
-
----
 
 输出文件
 
@@ -48,7 +31,7 @@ MP4转开机动画 ffmpeg, ffprobe
 应用转系统 MagiskModuleFactory_app2system_20260607_143052.zip
 修改属性 MagiskModuleFactory_prop_20260607_143052.zip
 开机动画 MagiskModuleFactory_bootanimation_20260607_143052.zip
-隐藏模块 MagiskModuleFactory_hidehelper_20260607_143052.zip
+
 
 ---
 
@@ -65,21 +48,16 @@ MP4转开机动画 ffmpeg, ffprobe
 注意事项
 
 1. 需要 root 权限：大多数功能需要 root 才能正常工作
-2. 部分功能需要额外依赖：如 ffmpeg、curl/wget
-3. 模块刷入后可能需要重启：部分修改需要重启才能生效
-4. 建议备份：修改系统文件前建议做好备份
+2. 模块刷入后可能需要重启：部分修改需要重启才能生效
+3. 建议备份：修改系统文件前建议做好备份
 
 ---
 
 常见问题
 
-Q: 脚本运行提示 "未找到可用的模块安装方法"
+Q: 运行提示 "未找到可用的模块安装方法"
 
 A: 请确保已安装 Magisk / KernelSU / APatch 之一，并且已正确 root。
-
-Q: MP4 转动画失败
-
-A: 请检查是否已安装 ffmpeg，以及 MP4 文件是否损坏。
 
 Q: 模块刷入后没有效果
 
@@ -102,3 +80,4 @@ Copyright © 2026 github.com/zlkypx
 
 版本 日期 更新内容
 1.0 2026-06-07 初始发布，包含9项功能
+2.0 2026-06-12 发布Android程序，删除原第九项功能
