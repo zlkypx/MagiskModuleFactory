@@ -61,7 +61,7 @@ public class FontModuleFactory {
         // 从 assets 解压完整 lxgw 模板
         extractTemplateZip(context, workDir);
 
-        // 添加用户字体文件（保留模板原有 EmptyFont，以 fontwN.ext 命名）
+        // 复制用户字体文件覆盖 EmptyFont
         File fontsDir = new File(workDir, "system/fonts");
         for (Map.Entry<Integer, File> entry : weightFontMap.entrySet()) {
             int weight = entry.getKey();
@@ -69,9 +69,9 @@ public class FontModuleFactory {
             if (weight < 1 || weight > 9) continue;
             if (!userFont.exists()) continue;
 
-            String ext = getFileExtension(userFont.getName());
-            String targetName = "fontw" + weight + "." + ext;
-            copyFile(userFont, new File(fontsDir, targetName));
+            String targetFileName = EMPTY_FONT_NAMES[weight];
+            File targetFile = new File(fontsDir, targetFileName);
+            copyFile(userFont, targetFile);
         }
 
         // 更新 module.prop 中的 id
@@ -147,11 +147,6 @@ public class FontModuleFactory {
                 fos.write(buf, 0, len);
             }
         }
-    }
-
-    private static String getFileExtension(String fileName) {
-        int i = fileName.lastIndexOf('.');
-        return i < 0 ? "" : fileName.substring(i + 1);
     }
 
     private static File createZip(File workDir, File outputDir, String zipName) {

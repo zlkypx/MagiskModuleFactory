@@ -149,11 +149,6 @@ public class FontModuleFactory {
         }
     }
 
-    private static String getFileExtension(String fileName) {
-        int i = fileName.lastIndexOf('.');
-        return i < 0 ? "" : fileName.substring(i + 1);
-    }
-
     private static File createZip(File workDir, File outputDir, String zipName) {
         File zipFile = new File(outputDir, zipName);
         MagiskModuleUtils.zipDirectory(workDir, zipFile);
